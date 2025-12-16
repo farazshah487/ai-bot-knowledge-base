@@ -1,17 +1,17 @@
 import streamlit as st
 from pdf_processing import extract_text_from_pdf, chunk_text
-from url_processing import extract_text_from_url  # <-- new import
+from url_processing import extract_text_from_url
 from llm import generate_answer
 from vector_db import FAISSVectorDB
+from embeddings import create_embeddings
 from openai import OpenAI
 
 client = OpenAI()
 
 st.title("Knowledge Base Bot")
 
-# Select input type
+# Input selector
 input_type = st.radio("Select input type", ["PDF Upload", "URL"])
-
 user_question = st.text_input("Ask a question:")
 
 text = None
@@ -19,28 +19,42 @@ if input_type == "PDF Upload":
     uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
     if uploaded_file:
         text = extract_text_from_pdf(uploaded_file)
+
 elif input_type == "URL":
     url = st.text_input("Enter URL")
     if url:
         text = extract_text_from_url(url)
 
 if text and user_question:
-    # Split into chunks
-    chunks = chunk_text(text)
+    with st.spinner("🔍 Reading, indexing, and answering..."):
+        # 1️⃣ Chunk text
+        chunks = chunk_text(text)
 
-    # Generate embeddings (updated for new OpenAI client)
-    embeddings = [client.embeddings.create(input=chunk, model="text-embedding-3-large").data[0].embedding
-                  for chunk in chunks]
+        if not chunks:
+            st.error("No readable content found.")
+            st.stop()
 
-    # Store in FAISS
-    vector_db = FAISSVectorDB(dimension=len(embeddings[0]))
-    vector_db.add_embeddings(embeddings, chunks)
+        # 2️⃣ Generate embeddings (SAFE + throttled)
+        embeddings = create_embeddings(chunks)
 
-    # Query
-    query_embedding = client.embeddings.create(input=user_question, model="text-embedding-3-large").data[0].embedding
-    relevant_chunks = vector_db.query(query_embedding, top_k=3)
+        if not embeddings:
+            st.error("Failed to generate embeddings.")
+            st.stop()
 
-    # Generate answer
-    answer = generate_answer(user_question, relevant_chunks)
+        # 3️⃣ Store in FAISS
+        vector_db = FAISSVectorDB(dimension=len(embeddings[0]))
+        vector_db.add_embeddings(embeddings, chunks[:len(embeddings)])
+
+        # 4️⃣ Embed user question
+        query_embedding = client.embeddings.create(
+            model="text-embedding-3-large",
+            input=user_question
+        ).data[0].embedding
+
+        relevant_chunks = vector_db.query(query_embedding, top_k=3)
+
+        # 5️⃣ Generate answer
+        answer = generate_answer(user_question, relevant_chunks)
+
     st.subheader("Answer")
     st.write(answer)
