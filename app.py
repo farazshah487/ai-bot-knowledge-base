@@ -4,6 +4,7 @@ from url_processing import extract_text_from_url
 from llm import generate_answer
 from vector_db import FAISSVectorDB
 from embeddings import create_embeddings
+from query_rewriter import rewrite_question
 from openai import OpenAI
 
 client = OpenAI()
@@ -11,11 +12,11 @@ client = OpenAI()
 st.title("Knowledge Base Bot")
 
 # Input selector
-input_type = st.radio("Select input type", ["PDF Upload", "URL"])
+input_type = st.radio("Select input type", ["Upload PDF", "URL"])
 user_question = st.text_input("Ask a question:")
 
 text = None
-if input_type == "PDF Upload":
+if input_type == "Upload PDF":
     uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
     if uploaded_file:
         text = extract_text_from_pdf(uploaded_file)
@@ -46,15 +47,22 @@ if text and user_question:
         vector_db.add_embeddings(embeddings, chunks[:len(embeddings)])
 
         # 4️⃣ Embed user question
+        # 4️⃣ Rewrite question for better retrieval
+        rewritten_question = rewrite_question(
+            user_question,
+            context_hint=chunks[0]  # first chunk gives topic context
+        )
+
         query_embedding = client.embeddings.create(
             model="text-embedding-3-large",
-            input=user_question
+            input=rewritten_question
         ).data[0].embedding
 
         relevant_chunks = vector_db.query(query_embedding, top_k=3)
 
         # 5️⃣ Generate answer
         answer = generate_answer(user_question, relevant_chunks)
-
+    st.caption(f"🔎 Interpreted question: {rewritten_question}")
     st.subheader("Answer")
     st.write(answer)
+
