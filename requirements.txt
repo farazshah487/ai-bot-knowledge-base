@@ -1,0 +1,9 @@
+pdfplumber
+langchain
+openai
+faiss-cpu
+streamlit
+numpy
+tiktoken
+requests
+beautifulsoup4
